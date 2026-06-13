@@ -1,0 +1,103 @@
+name: Build OpenDRT macOS
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      BUNDLE_NAME: OpenDRT.ofx.bundle
+      BUNDLE_EXECUTABLE: OpenDRT.ofx
+      ZIP_NAME: OpenDRT_${{ github.ref_name }}_macOS_universal.zip
+      ARTIFACT_NAME: OpenDRT-${{ github.ref_name }}-macos-universal
+
+    runs-on: macos-14
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure local OFX SDK is available
+        run: |
+          if [ ! -f "ofx-sdk/include/ofxImageEffect.h" ]; then
+            rm -rf ofx-sdk
+            git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx.git ofx-sdk
+          fi
+
+      - name: Ensure build tools are available
+        run: |
+          if command -v ninja >/dev/null 2>&1; then
+            ninja --version
+          else
+            brew install ninja
+          fi
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+
+      - name: Build
+        run: cmake --build build-macos --config Release
+
+      - name: Verify staged OFX bundle structure
+        run: |
+          BUNDLE_ROOT="bundle/${BUNDLE_NAME}"
+          EXECUTABLE_PATH="${BUNDLE_ROOT}/Contents/MacOS/${BUNDLE_EXECUTABLE}"
+          INFO_PLIST_PATH="${BUNDLE_ROOT}/Contents/Info.plist"
+          RESOURCES_PATH="${BUNDLE_ROOT}/Contents/Resources"
+
+          test -d "${BUNDLE_ROOT}"
+          test -d "${BUNDLE_ROOT}/Contents"
+          test -d "${BUNDLE_ROOT}/Contents/MacOS"
+          test -d "${RESOURCES_PATH}"
+          test -f "${EXECUTABLE_PATH}"
+          test -f "${INFO_PLIST_PATH}"
+
+          plutil -p "${INFO_PLIST_PATH}" >/dev/null
+          grep -q "<string>BNDL</string>" "${INFO_PLIST_PATH}"
+          grep -q "<string>com.dec18studios.OpenDRT</string>" "${INFO_PLIST_PATH}"
+
+          lipo -archs "${EXECUTABLE_PATH}" | grep -q "x86_64 arm64"
+          otool -l "${EXECUTABLE_PATH}" | grep -A3 LC_BUILD_VERSION | grep -q "minos 13.0"
+
+      - name: Package macOS portable bundle
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            bundle/${BUNDLE_NAME} \
+            ../${ZIP_NAME}
+
+      - name: Verify packaged zip extracts to OFX bundle
+        run: |
+          ZIP_PATH="../${ZIP_NAME}"
+          EXTRACT_DIR="$(mktemp -d)"
+          trap 'rm -rf "${EXTRACT_DIR}"' EXIT
+
+          test -f "${ZIP_PATH}"
+          ditto -x -k "${ZIP_PATH}" "${EXTRACT_DIR}"
+
+          EXTRACTED_BUNDLE="${EXTRACT_DIR}/${BUNDLE_NAME}"
+          EXTRACTED_EXECUTABLE="${EXTRACTED_BUNDLE}/Contents/MacOS/${BUNDLE_EXECUTABLE}"
+          EXTRACTED_INFO_PLIST="${EXTRACTED_BUNDLE}/Contents/Info.plist"
+
+          test -d "${EXTRACTED_BUNDLE}"
+          test -d "${EXTRACTED_BUNDLE}/Contents"
+          test -d "${EXTRACTED_BUNDLE}/Contents/MacOS"
+          test -d "${EXTRACTED_BUNDLE}/Contents/Resources"
+          test -f "${EXTRACTED_EXECUTABLE}"
+          test -f "${EXTRACTED_INFO_PLIST}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ZIP_NAME }}

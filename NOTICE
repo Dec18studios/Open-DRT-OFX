@@ -1,0 +1,29 @@
+OpenDRT for OFX
+===============
+
+This product bundles and is derived from OpenDRT, an open-source display
+rendering transform created by Jed Smith.
+
+    OpenDRT
+    Copyright (C) Jed Smith
+    https://github.com/jedypod/open-display-transform
+    Licensed under the GNU General Public License v3.0.
+
+The core display-transform algorithm in this repository
+(source/tools/6A_OpenDRT/core/) is derived from Jed Smith's OpenDRT and
+remains licensed under the GNU General Public License v3.0 (see LICENSE).
+
+Modifications and additions by Dec. 18 Studios, also under GPL-3.0:
+
+  * OpenFX plug-in wrapper (parameters, host integration, bundle packaging)
+  * CUDA backend  (source/tools/6A_OpenDRT/cuda/)   — Windows / Linux GPU path
+  * Metal backend (source/tools/6A_OpenDRT/metal/)  — macOS GPU path
+  * Cross-platform build system and CI for macOS (universal), Windows (CUDA),
+    and Linux (CUDA).
+
+This OFX build is distributed free of charge. It is also offered as the
+"6A. OpenDRT" tool inside the proprietary Dec. 18 Studios "Look Dev Tools"
+suite; the OpenDRT algorithm source is identical and remains GPL-3.0 in both.
+
+Because this software is licensed under the GPL-3.0, the complete corresponding
+source for the OpenDRT plug-in is published in this repository.
