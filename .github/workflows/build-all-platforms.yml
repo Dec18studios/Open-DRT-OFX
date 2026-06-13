@@ -5,6 +5,10 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    branches: [main]
+    # Validates all three platform builds on PRs. The release job below is
+    # tag-gated (refs/tags/v*), so PR runs build + verify but never publish.
 
 permissions:
   contents: write
