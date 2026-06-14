@@ -10,8 +10,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       BUNDLE_NAME: OpenDRT.ofx.bundle
       BUNDLE_EXECUTABLE: OpenDRT.ofx
-      ZIP_NAME: OpenDRT_${{ github.ref_name }}_macOS_universal.zip
-      ARTIFACT_NAME: OpenDRT-${{ github.ref_name }}-macos-universal
+      ZIP_NAME: OpenDRT_${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}_macOS_universal.zip
+      ARTIFACT_NAME: OpenDRT-${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-macos-universal
 
     runs-on: macos-14
 
