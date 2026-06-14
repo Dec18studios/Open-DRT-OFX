@@ -1,0 +1,101 @@
+name: Build OpenDRT Windows CUDA
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  build-windows-cuda:
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      BUNDLE_NAME: OpenDRT.ofx.bundle
+      BUNDLE_EXECUTABLE: OpenDRT.ofx
+      ZIP_NAME: OpenDRT_${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}_windows_x86_64_cuda.zip
+      ARTIFACT_NAME: OpenDRT-${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-windows-cuda
+
+    runs-on: windows-2022
+
+    defaults:
+      run:
+        shell: powershell
+        working-directory: source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure local OFX SDK is available
+        run: |
+          if (-not (Test-Path "ofx-sdk/include/ofxImageEffect.h")) {
+            if (Test-Path "ofx-sdk") {
+              Remove-Item -Recurse -Force "ofx-sdk"
+            }
+            git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx.git ofx-sdk
+          }
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.30
+        with:
+          cuda: "12.9.1"
+
+      - name: Verify CUDA toolkit
+        run: |
+          nvcc --version
+          if (-not $env:CUDA_PATH) {
+            throw "CUDA_PATH was not set by the CUDA toolkit installer."
+          }
+          $hostConfig = Join-Path $env:CUDA_PATH "include\\crt\\host_config.h"
+          if (-not (Test-Path $hostConfig -PathType Leaf)) {
+            throw "CUDA toolkit install is incomplete. Missing required compiler header: $hostConfig"
+          }
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-win-ci -G "Visual Studio 17 2022" -A x64 `
+            -DCUDAToolkit_ROOT="$env:CUDA_PATH"
+
+      - name: Build
+        run: cmake --build build-win-ci --config Release
+
+      - name: Verify staged OFX bundle structure
+        run: |
+          $bundleRoot = "bundle/$env:BUNDLE_NAME"
+          $exePath = Join-Path $bundleRoot "Contents/Win64/$env:BUNDLE_EXECUTABLE"
+          $resourcesPath = Join-Path $bundleRoot "Contents/Resources"
+
+          if (-not (Test-Path $bundleRoot -PathType Container)) { throw "Missing bundle root: $bundleRoot" }
+          if (-not (Test-Path (Join-Path $bundleRoot "Contents") -PathType Container)) { throw "Missing Contents directory." }
+          if (-not (Test-Path (Join-Path $bundleRoot "Contents/Win64") -PathType Container)) { throw "Missing Win64 directory." }
+          if (-not (Test-Path $resourcesPath -PathType Container)) { throw "Missing Resources directory." }
+          if (-not (Test-Path $exePath -PathType Leaf)) { throw "Missing staged OFX binary: $exePath" }
+
+      - name: Package Windows CUDA portable bundle
+        run: |
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE $env:ZIP_NAME
+          if (Test-Path $zipPath) {
+            Remove-Item -Force $zipPath
+          }
+          Compress-Archive -Path "bundle/$env:BUNDLE_NAME" -DestinationPath $zipPath
+
+      - name: Verify packaged zip extracts to OFX bundle
+        run: |
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE $env:ZIP_NAME
+          $extractDir = Join-Path $env:RUNNER_TEMP "opendrt-win-extract"
+          if (Test-Path $extractDir) {
+            Remove-Item -Recurse -Force $extractDir
+          }
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir
+
+          $bundleRoot = Join-Path $extractDir $env:BUNDLE_NAME
+          $exePath = Join-Path $bundleRoot "Contents/Win64/$env:BUNDLE_EXECUTABLE"
+          if (-not (Test-Path $bundleRoot -PathType Container)) { throw "Missing extracted bundle root." }
+          if (-not (Test-Path (Join-Path $bundleRoot "Contents") -PathType Container)) { throw "Missing extracted Contents directory." }
+          if (-not (Test-Path (Join-Path $bundleRoot "Contents/Win64") -PathType Container)) { throw "Missing extracted Win64 directory." }
+          if (-not (Test-Path (Join-Path $bundleRoot "Contents/Resources") -PathType Container)) { throw "Missing extracted Resources directory." }
+          if (-not (Test-Path $exePath -PathType Leaf)) { throw "Missing extracted OFX binary." }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ZIP_NAME }}

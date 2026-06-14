@@ -1,2 +1,13 @@
+# Build output
+source/build/
+source/build-*/
+bundle/
+source/bundle/
+
+# OFX SDK is cloned on demand, never committed
+source/ofx-sdk/
+
+# Object files / native cruft
 *.o
-.o
+*.obj
+.DS_Store

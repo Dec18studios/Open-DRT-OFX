@@ -1,0 +1,113 @@
+name: Build OpenDRT Linux CUDA
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  build-linux-cuda:
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      BUNDLE_NAME: OpenDRT.ofx.bundle
+      BUNDLE_EXECUTABLE: OpenDRT.ofx
+      TARBALL_NAME: OpenDRT_${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}_linux_x86_64_cuda.tar.gz
+      ARTIFACT_NAME: OpenDRT-${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-linux-cuda
+
+    runs-on: ubuntu-22.04
+
+    container:
+      image: nvidia/cuda:13.0.2-devel-ubuntu22.04
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential \
+            cmake \
+            file \
+            git \
+            ninja-build \
+            tar \
+            gzip
+
+      - name: Ensure local OFX SDK is available
+        run: |
+          if [ ! -f "ofx-sdk/include/ofxImageEffect.h" ]; then
+            rm -rf ofx-sdk
+            git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx.git ofx-sdk
+          fi
+
+      - name: Verify CUDA toolkit
+        run: |
+          nvcc --version
+          test -x /usr/local/cuda/bin/nvcc
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-linux-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCUDAToolkit_ROOT=/usr/local/cuda
+
+      - name: Build
+        run: cmake --build build-linux-ci --config Release
+
+      - name: Verify staged OFX bundle structure
+        run: |
+          BUNDLE_ROOT="bundle/${BUNDLE_NAME}"
+          EXECUTABLE_PATH="${BUNDLE_ROOT}/Contents/Linux-x86-64/${BUNDLE_EXECUTABLE}"
+          RESOURCES_PATH="${BUNDLE_ROOT}/Contents/Resources"
+
+          test -d "${BUNDLE_ROOT}"
+          test -d "${BUNDLE_ROOT}/Contents"
+          test -d "${BUNDLE_ROOT}/Contents/Linux-x86-64"
+          test -d "${RESOURCES_PATH}"
+          test -f "${EXECUTABLE_PATH}"
+
+          file "${EXECUTABLE_PATH}" | grep -q "ELF 64-bit"
+          ldd "${EXECUTABLE_PATH}" | grep -q "libcudart"
+
+      - name: Package Linux CUDA portable tarball
+        run: |
+          TARBALL_OUTPUT="${GITHUB_WORKSPACE}/${TARBALL_NAME}"
+          RESOURCES_DIR="bundle/${BUNDLE_NAME}/Contents/Resources"
+          mkdir -p "${RESOURCES_DIR}"
+          touch "${RESOURCES_DIR}/.keep"
+          rm -f "${TARBALL_OUTPUT}"
+          ( cd bundle && tar -czf "${TARBALL_OUTPUT}" "${BUNDLE_NAME}" )
+
+      - name: Verify packaged tarball extracts to OFX bundle
+        run: |
+          TARBALL_PATH="${GITHUB_WORKSPACE}/${TARBALL_NAME}"
+          EXTRACT_DIR="$(mktemp -d)"
+          trap 'rm -rf "${EXTRACT_DIR}"' EXIT
+
+          test -f "${TARBALL_PATH}"
+          tar -xzf "${TARBALL_PATH}" -C "${EXTRACT_DIR}"
+
+          EXTRACTED_BUNDLE="${EXTRACT_DIR}/${BUNDLE_NAME}"
+          EXTRACTED_EXECUTABLE="${EXTRACTED_BUNDLE}/Contents/Linux-x86-64/${BUNDLE_EXECUTABLE}"
+          EXTRACTED_KEEP="${EXTRACTED_BUNDLE}/Contents/Resources/.keep"
+
+          test -d "${EXTRACTED_BUNDLE}"
+          test -d "${EXTRACTED_BUNDLE}/Contents"
+          test -d "${EXTRACTED_BUNDLE}/Contents/Linux-x86-64"
+          test -d "${EXTRACTED_BUNDLE}/Contents/Resources"
+          test -f "${EXTRACTED_EXECUTABLE}"
+          test -f "${EXTRACTED_KEEP}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ github.workspace }}/${{ env.TARBALL_NAME }}

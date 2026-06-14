@@ -1,0 +1,85 @@
+name: Build OpenDRT All Platforms
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+    # Validates all three platform builds on PRs. The release job below is
+    # tag-gated (refs/tags/v*), so PR runs build + verify but never publish.
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    uses: ./.github/workflows/build-macos.yml
+    secrets: inherit
+
+  build-linux-cuda:
+    uses: ./.github/workflows/build-linux-cuda.yml
+    secrets: inherit
+
+  build-windows-cuda:
+    uses: ./.github/workflows/build-windows-cuda.yml
+    secrets: inherit
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-macos, build-linux-cuda, build-windows-cuda]
+    runs-on: ubuntu-latest
+    env:
+      # Empty on forks / repos without the org secret — the manager-dispatch step
+      # below is skipped rather than failing the release.
+      HAS_PAT: ${{ secrets.PLUGIN_REPOS_PAT != '' }}
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Releasing OpenDRT ${VERSION}"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded assets
+        run: find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \) | sort
+
+      - name: Create release on Open-DRT-OFX
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ASSETS=$(find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \))
+          if [ -z "$ASSETS" ]; then
+            echo "::error::No release assets found in artifacts"
+            exit 1
+          fi
+
+          # Pre-release for v*-beta/-alpha/-rc tags; otherwise latest stable.
+          if [[ "${VERSION}" == *"-beta"* ]] || [[ "${VERSION}" == *"-alpha"* ]] || [[ "${VERSION}" == *"-rc"* ]]; then
+            RELEASE_FLAGS="--prerelease"
+          else
+            RELEASE_FLAGS="--latest"
+          fi
+
+          gh release create "${VERSION}" \
+            --repo Dec18studios/Open-DRT-OFX \
+            --title "OpenDRT ${VERSION}" \
+            --notes "OpenDRT ${VERSION} — free GPL-3.0 build of Jed Smith's OpenDRT display transform for OFX hosts (Metal on macOS, CUDA on Windows/Linux). See README for install." \
+            ${RELEASE_FLAGS} \
+            $ASSETS
+
+      - name: Trigger Plugin Manager catalog rebuild
+        if: env.HAS_PAT == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PLUGIN_REPOS_PAT }}
+        run: |
+          gh api -X POST repos/Dec18studios/Dec18-Plugin-Manager/dispatches \
+            -f event_type=plugin-release \
+            -f 'client_payload[plugin]=opendrt-ofx'

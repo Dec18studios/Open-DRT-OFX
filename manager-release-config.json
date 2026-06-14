@@ -1,0 +1,43 @@
+{
+  "pluginId": "opendrt-ofx",
+  "displayName": "OpenDRT",
+  "releaseRepo": "Dec18studios/Open-DRT-OFX",
+  "minManagerVersion": "0.1.0",
+  "hostProcesses": ["Resolve", "DaVinci Resolve", "Fusion", "Fusion Studio", "Nuke", "NukeX", "NukeStudio", "Hiero"],
+  "requiredFamilies": ["macos"],
+  "category": "DRT",
+  "description": "Free, open-source (GPL-3.0) OpenDRT display render transform for OFX hosts, with GPU acceleration (Metal on macOS, CUDA on Windows/Linux).",
+  "tags": ["DRT", "open source", "display", "render", "OFX"],
+  "assetRules": [
+    {
+      "family": "macos",
+      "platform": "macos",
+      "arch": "universal",
+      "assetPattern": "OpenDRT.*macOS.*universal.*\\.zip$",
+      "packageType": "zip",
+      "bundleName": "OpenDRT.ofx.bundle",
+      "bundleIdentifier": "com.dec18studios.OpenDRT",
+      "installPath": "/Library/OFX/Plugins"
+    },
+    {
+      "family": "windows",
+      "platform": "windows",
+      "arch": "x86_64",
+      "assetPattern": "OpenDRT.*[Ww]indows.*x86_64.*\\.zip$",
+      "packageType": "zip",
+      "bundleName": "OpenDRT.ofx.bundle",
+      "bundleIdentifier": "com.dec18studios.OpenDRT",
+      "installPath": "C:\\Program Files\\Common Files\\OFX\\Plugins"
+    },
+    {
+      "family": "linux",
+      "platform": "linux",
+      "arch": "x86_64",
+      "assetPattern": "OpenDRT.*linux.*x86_64.*\\.tar\\.gz$",
+      "packageType": "tar.gz",
+      "bundleName": "OpenDRT.ofx.bundle",
+      "bundleIdentifier": "com.dec18studios.OpenDRT",
+      "installPath": "/usr/OFX/Plugins"
+    }
+  ]
+}
