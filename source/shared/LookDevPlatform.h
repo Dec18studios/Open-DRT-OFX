@@ -44,6 +44,9 @@
   #ifndef _log2f
     #define _log2f(x)       log2f((float)(x))
   #endif
+  #ifndef _logf
+    #define _logf(x)        logf((float)(x))
+  #endif
   #ifndef _fmaxf
     #define _fmaxf(x,y)     fmaxf((float)(x),(float)(y))
   #endif
@@ -114,6 +117,9 @@
   #endif
   #ifndef _log2f
     #define _log2f(x) std::log2((float)(x))
+  #endif
+  #ifndef _logf
+    #define _logf(x) std::log((float)(x))
   #endif
   #ifndef _fmaxf
     // std::fmax (NOT std::max) so the host CPU path matches CUDA/Metal fmaxf:

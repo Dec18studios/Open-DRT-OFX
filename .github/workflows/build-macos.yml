@@ -10,10 +10,10 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       BUNDLE_NAME: OpenDRT.ofx.bundle
       BUNDLE_EXECUTABLE: OpenDRT.ofx
-      ZIP_NAME: OpenDRT_${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}_macOS_universal.zip
+      ZIP_NAME: OpenDRT_macOS_universal.zip
       ARTIFACT_NAME: OpenDRT-${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-macos-universal
 
-    runs-on: macos-14
+    runs-on: macos-15
 
     defaults:
       run:
@@ -69,6 +69,19 @@ jobs:
 
           lipo -archs "${EXECUTABLE_PATH}" | grep -q "x86_64 arm64"
           otool -l "${EXECUTABLE_PATH}" | grep -A3 LC_BUILD_VERSION | grep -q "minos 13.0"
+          test -f "${RESOURCES_PATH}/com.dec18studios.OpenDRT.png"
+
+      - name: Verify no OpenCL in the macOS binary
+        run: |
+          # macOS runs on Metal only; the OpenCL backend is Windows and Linux.
+          EXECUTABLE_PATH="bundle/${BUNDLE_NAME}/Contents/MacOS/${BUNDLE_EXECUTABLE}"
+          if otool -L "${EXECUTABLE_PATH}" | grep -q OpenCL; then
+            echo "::error::${EXECUTABLE_PATH} links OpenCL"; exit 1
+          fi
+          count=$(nm -u "${EXECUTABLE_PATH}" | grep -c '_cl[A-Z]' || true)
+          if [ "${count}" != "0" ]; then
+            echo "::error::${EXECUTABLE_PATH} imports ${count} OpenCL symbols"; exit 1
+          fi
 
       - name: Package macOS portable bundle
         run: |

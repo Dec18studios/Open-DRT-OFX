@@ -10,7 +10,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       BUNDLE_NAME: OpenDRT.ofx.bundle
       BUNDLE_EXECUTABLE: OpenDRT.ofx
-      TARBALL_NAME: OpenDRT_${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}_linux_x86_64_cuda.tar.gz
+      # One zip holds both GPU backends (CUDA and OpenCL).
+      ZIP_NAME: OpenDRT_linux_cuda.zip
       ARTIFACT_NAME: OpenDRT-${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-linux-cuda
 
     runs-on: ubuntu-22.04
@@ -38,8 +39,10 @@ jobs:
             file \
             git \
             ninja-build \
-            tar \
-            gzip
+            zip \
+            unzip \
+            opencl-headers \
+            ocl-icd-opencl-dev
 
       - name: Ensure local OFX SDK is available
         run: |
@@ -57,10 +60,45 @@ jobs:
         run: |
           cmake -S . -B build-linux-ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCUDAToolkit_ROOT=/usr/local/cuda
+            -DCUDAToolkit_ROOT=/usr/local/cuda 2>&1 | tee cmake-configure-linux.log
+          test "${PIPESTATUS[0]}" -eq 0
+          # Headers only (opencl-headers). If they go missing the plugin would
+          # silently ship without its OpenCL backend.
+          grep -q "OpenCL backend ON" cmake-configure-linux.log
 
       - name: Build
         run: cmake --build build-linux-ci --config Release
+
+      - name: Verify OpenCL backend (compiled in, not linked)
+        run: |
+          status=0
+          OFX="bundle/${BUNDLE_NAME}/Contents/Linux-x86-64/${BUNDLE_EXECUTABLE}"
+          for sym in OpenDRT OpenDRTv11 Tesseract Chromagnon; do
+            test -f "build-linux-ci/generated/${sym}OpenCLKernelSource.h" || { echo "::error::missing generated ${sym} kernel header"; status=1; }
+          done
+          # The ICD loader is dlopen'ed and cudart is static: neither may be NEEDED.
+          if readelf -d "${OFX}" | grep NEEDED | grep -E 'libcudart|libstdc\+\+|libgcc_s|OpenCL'; then
+            echo "::error::${OFX} has a forbidden NEEDED entry"; status=1
+          fi
+          # Short fragment only: GCC splits long string literals in .rodata.
+          grep -a -q OpenDRTKernel "${OFX}" || { echo "::error::${OFX} is missing the OpenCL kernel"; status=1; }
+          exit ${status}
+
+      - name: Verify no shared libstdc++ dependency
+        # Some hosts load libraries that export their own libstdc++ internals; a
+        # plugin that imports std:: symbols dynamically can bind to those and
+        # crash. The .ofx carries its C++ runtime statically (see CMakeLists.txt).
+        run: |
+          status=0
+          OFX="bundle/${BUNDLE_NAME}/Contents/Linux-x86-64/${BUNDLE_EXECUTABLE}"
+          if objdump -p "${OFX}" | grep -E "NEEDED +libstdc\+\+|NEEDED +libgcc_s"; then
+            echo "::error::${OFX} still links the shared C++ runtime"; status=1
+          fi
+          if objdump -T "${OFX}" | grep -E "GLIBCXX_|CXXABI_"; then
+            echo "::error::${OFX} still imports versioned libstdc++ symbols"; status=1
+          fi
+          echo "${OFX}: exports $(nm -D --defined-only "${OFX}" | wc -l) dynamic symbols"
+          exit ${status}
 
       - name: Verify staged OFX bundle structure
         run: |
@@ -73,41 +111,37 @@ jobs:
           test -d "${BUNDLE_ROOT}/Contents/Linux-x86-64"
           test -d "${RESOURCES_PATH}"
           test -f "${EXECUTABLE_PATH}"
+          test -f "${RESOURCES_PATH}/com.dec18studios.OpenDRT.png"
 
           file "${EXECUTABLE_PATH}" | grep -q "ELF 64-bit"
-          ldd "${EXECUTABLE_PATH}" | grep -q "libcudart"
 
-      - name: Package Linux CUDA portable tarball
+      - name: Package Linux bundle
         run: |
-          TARBALL_OUTPUT="${GITHUB_WORKSPACE}/${TARBALL_NAME}"
-          RESOURCES_DIR="bundle/${BUNDLE_NAME}/Contents/Resources"
-          mkdir -p "${RESOURCES_DIR}"
-          touch "${RESOURCES_DIR}/.keep"
-          rm -f "${TARBALL_OUTPUT}"
-          ( cd bundle && tar -czf "${TARBALL_OUTPUT}" "${BUNDLE_NAME}" )
+          ZIP_OUTPUT="${GITHUB_WORKSPACE}/${ZIP_NAME}"
+          rm -f "${ZIP_OUTPUT}"
+          ( cd bundle && zip -qr "${ZIP_OUTPUT}" "${BUNDLE_NAME}" )
 
-      - name: Verify packaged tarball extracts to OFX bundle
+      - name: Verify packaged zip extracts to OFX bundle
         run: |
-          TARBALL_PATH="${GITHUB_WORKSPACE}/${TARBALL_NAME}"
+          ZIP_PATH="${GITHUB_WORKSPACE}/${ZIP_NAME}"
           EXTRACT_DIR="$(mktemp -d)"
           trap 'rm -rf "${EXTRACT_DIR}"' EXIT
 
-          test -f "${TARBALL_PATH}"
-          tar -xzf "${TARBALL_PATH}" -C "${EXTRACT_DIR}"
+          test -f "${ZIP_PATH}"
+          unzip -q "${ZIP_PATH}" -d "${EXTRACT_DIR}"
 
           EXTRACTED_BUNDLE="${EXTRACT_DIR}/${BUNDLE_NAME}"
           EXTRACTED_EXECUTABLE="${EXTRACTED_BUNDLE}/Contents/Linux-x86-64/${BUNDLE_EXECUTABLE}"
-          EXTRACTED_KEEP="${EXTRACTED_BUNDLE}/Contents/Resources/.keep"
 
           test -d "${EXTRACTED_BUNDLE}"
           test -d "${EXTRACTED_BUNDLE}/Contents"
           test -d "${EXTRACTED_BUNDLE}/Contents/Linux-x86-64"
           test -d "${EXTRACTED_BUNDLE}/Contents/Resources"
           test -f "${EXTRACTED_EXECUTABLE}"
-          test -f "${EXTRACTED_KEEP}"
+          test -f "${EXTRACTED_BUNDLE}/Contents/Resources/com.dec18studios.OpenDRT.png"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/${{ env.TARBALL_NAME }}
+          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}

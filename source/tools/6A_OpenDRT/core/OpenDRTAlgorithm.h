@@ -159,6 +159,12 @@ LDT_FUNC float odt_softplus(float x, float s, float x0, float y0) {
     return s*_logf(_fmaxf(0.0f, m + _expf(x/s)));
 }
 
+// Unconstrained softplus (upstream v1.0.1). Used only when mathVariant == 1.
+LDT_FUNC float odt_softplus_uc(float x, float s) {
+    if (x > 10.0f*s || s < 1e-3f) return x;
+    return s*_logf(_fmaxf(0.0f, 1.0f + _expf(x/s)));
+}
+
 // gamma_contrast — Advanced Hue Contrast helper (MetalKernel.mm:248-250).
 //   mid_gray * pow(max(0, x/mid_gray), gamma)
 LDT_FUNC float odt_gamma_contrast(float x, float gamma, float mid_gray) {
@@ -244,16 +250,17 @@ LDT_FUNC float odt_apply_oetf(float x, int type) {
 LDT_FUNC float3 odt_eotf_hlg(float3 rgb, int inverse) {
     if (inverse == 1) {
         float Yd = 0.2627f*rgb.x + 0.6780f*rgb.y + 0.0593f*rgb.z;
-        rgb = rgb*_powf(Yd, (1.0f - 1.2f)/1.2f);
-        rgb.x = rgb.x <= 1.0f/12.0f ? _sqrtf(3.0f*rgb.x) : 0.17883277f*_logf(12.0f*rgb.x - 0.28466892f) + 0.55991073f;
-        rgb.y = rgb.y <= 1.0f/12.0f ? _sqrtf(3.0f*rgb.y) : 0.17883277f*_logf(12.0f*rgb.y - 0.28466892f) + 0.55991073f;
-        rgb.z = rgb.z <= 1.0f/12.0f ? _sqrtf(3.0f*rgb.z) : 0.17883277f*_logf(12.0f*rgb.z - 0.28466892f) + 0.55991073f;
+        rgb = rgb*odt_spowf(Yd, (1.0f - 1.2f)/1.2f);
+        // Deviation from upstream: clamp the sqrt argument at 0 so a negative channel gives 0, not NaN.
+        rgb.x = rgb.x <= 1.0f/12.0f ? _sqrtf(3.0f*_fmaxf(0.0f, rgb.x)) : 0.17883277f*_logf(12.0f*rgb.x - 0.28466892f) + 0.55991073f;
+        rgb.y = rgb.y <= 1.0f/12.0f ? _sqrtf(3.0f*_fmaxf(0.0f, rgb.y)) : 0.17883277f*_logf(12.0f*rgb.y - 0.28466892f) + 0.55991073f;
+        rgb.z = rgb.z <= 1.0f/12.0f ? _sqrtf(3.0f*_fmaxf(0.0f, rgb.z)) : 0.17883277f*_logf(12.0f*rgb.z - 0.28466892f) + 0.55991073f;
     } else {
         rgb.x = rgb.x <= 0.5f ? rgb.x*rgb.x/3.0f : (_expf((rgb.x - 0.55991073f)/0.17883277f) + 0.28466892f)/12.0f;
         rgb.y = rgb.y <= 0.5f ? rgb.y*rgb.y/3.0f : (_expf((rgb.y - 0.55991073f)/0.17883277f) + 0.28466892f)/12.0f;
         rgb.z = rgb.z <= 0.5f ? rgb.z*rgb.z/3.0f : (_expf((rgb.z - 0.55991073f)/0.17883277f) + 0.28466892f)/12.0f;
         float Ys = 0.2627f*rgb.x + 0.6780f*rgb.y + 0.0593f*rgb.z;
-        rgb = rgb*_powf(Ys, 1.2f - 1.0f);
+        rgb = rgb*odt_spowf(Ys, 1.2f - 1.0f);
     }
     return rgb;
 }
@@ -346,6 +353,56 @@ LDT_FUNC void odt_getInputMatrix(int gamut, float3 matrix[3]) {
             matrix[0] = make_float3(0.412390917540f, 0.212639078498f, 0.019330825657f);
             matrix[1] = make_float3(0.357584357262f, 0.715168714523f, 0.119194783270f);
             matrix[2] = make_float3(0.180480793118f, 0.072192311287f, 0.950532138348f);
+            break;
+        case 6: // Arri Wide Gamut 3 to XYZ
+            matrix[0] = make_float3(0.638007619284f, 0.291953779f, 0.002798279032f);
+            matrix[1] = make_float3(0.214703856337f, 0.823841041511f, -0.067034235689f);
+            matrix[2] = make_float3(0.097744451431f, -0.11579482051f, 1.15329370742f);
+            break;
+        case 7: // Arri Wide Gamut 4 to XYZ
+            matrix[0] = make_float3(0.704858320407f, 0.254524176404f, 0.0f);
+            matrix[1] = make_float3(0.12976029517f, 0.781477732712f, 0.0f);
+            matrix[2] = make_float3(0.115837311474f, -0.036001909116f, 1.08905775076f);
+            break;
+        case 8: // Red Wide Gamut RGB to XYZ
+            matrix[0] = make_float3(0.735275208950f, 0.286694079638f, -0.079680845141f);
+            matrix[1] = make_float3(0.068609409034f, 0.842979073524f, -0.347343206406f);
+            matrix[2] = make_float3(0.146571278572f, -0.129673242569f, 1.516081929207f);
+            break;
+        case 9: // Sony S-Gamut3 to XYZ
+            matrix[0] = make_float3(0.706482713192f, 0.270979670813f, -0.009677845386f);
+            matrix[1] = make_float3(0.128801049791f, 0.786606411221f, 0.004600037493f);
+            matrix[2] = make_float3(0.115172164069f, -0.057586082034f, 1.09413555865f);
+            break;
+        case 10: // Sony S-Gamut3.Cine to XYZ
+            matrix[0] = make_float3(0.599083920758f, 0.215075820116f, -0.032065849545f);
+            matrix[1] = make_float3(0.248925516115f, 0.885068501744f, -0.027658390679f);
+            matrix[2] = make_float3(0.102446490178f, -0.100144321859f, 1.14878199098f);
+            break;
+        case 11: // Panasonic V-Gamut to XYZ
+            matrix[0] = make_float3(0.679644469878f, 0.26068555009f, -0.009310198218f);
+            matrix[1] = make_float3(0.15221141244f, 0.77489446333f, -0.004612467044f);
+            matrix[2] = make_float3(0.118600044733f, -0.03558001342f, 1.10298041602f);
+            break;
+        case 12: // Blackmagic Wide Gamut to XYZ
+            matrix[0] = make_float3(0.606538414955f, 0.267992943525f, -0.029442556202f);
+            matrix[1] = make_float3(0.220412746072f, 0.832748472691f, -0.086612440646f);
+            matrix[2] = make_float3(0.123504832387f, -0.100741356611f, 1.205112814903f);
+            break;
+        case 13: // Filmlight E-Gamut to XYZ
+            matrix[0] = make_float3(0.705396831036f, 0.280130714178f, -0.103781513870f);
+            matrix[1] = make_float3(0.164041340351f, 0.820206701756f, -0.072907261550f);
+            matrix[2] = make_float3(0.081017754972f, -0.100337378681f, 1.265746593475f);
+            break;
+        case 14: // Filmlight E-Gamut2 to XYZ
+            matrix[0] = make_float3(0.736477700184f, 0.275069984406f, -0.124225154248f);
+            matrix[1] = make_float3(0.130739651087f, 0.828017790216f, -0.087159767391f);
+            matrix[2] = make_float3(0.083238575781f, -0.103087774621f, 1.3004426724f);
+            break;
+        case 15: // DaVinci Wide Gamut to XYZ
+            matrix[0] = make_float3(0.700622320175f, 0.274118483067f, -0.098962903023f);
+            matrix[1] = make_float3(0.148774802685f, 0.873631775379f, -0.137895315886f);
+            matrix[2] = make_float3(0.101058728993f, -0.147750422359f, 1.325916051865f);
             break;
         default:
             matrix[0] = make_float3(1.0f, 0.0f, 0.0f);
@@ -448,23 +505,37 @@ LDT_FUNC float3 opendrt_processPixel(float3 in_, int x, int y, int w, int h,
         rgb = make_float3(ramp, ramp, ramp);
     }
 
-    // RGB chips test pattern
+    // RGB chips test pattern: seven rows (R, Y, G, C, B, M, grey), each one a
+    // scene linear exposure ramp in the input gamut. Exact black at the left
+    // edge, grey (0.18) a third of the way across, 16 stops over grey at the
+    // right edge. The last eighth blends into neutral so every row lands on
+    // the creative white point white. Scene linear, so the In Transfer
+    // Function is skipped for the chart.
     if (params->rgbChipsMode == 1) {
-        float ramp = (float)x / (float)(w - 1);
+        float t = (float)x / (float)(w - 1);
         int band = y * 7 / h;
+        float3 hue;
         switch (band) {
-            case 0: rgb = make_float3(ramp, 0.0f, 0.0f); break;
-            case 1: rgb = make_float3(ramp, ramp, 0.0f); break;
-            case 2: rgb = make_float3(0.0f, ramp, 0.0f); break;
-            case 3: rgb = make_float3(0.0f, ramp, ramp); break;
-            case 4: rgb = make_float3(0.0f, 0.0f, ramp); break;
-            case 5: rgb = make_float3(ramp, 0.0f, ramp); break;
-            case 6: rgb = make_float3(ramp, ramp, ramp); break;
-            default: rgb = make_float3(ramp, ramp, ramp); break;
+            case 0: hue = make_float3(1.0f, 0.0f, 0.0f); break;
+            case 1: hue = make_float3(1.0f, 1.0f, 0.0f); break;
+            case 2: hue = make_float3(0.0f, 1.0f, 0.0f); break;
+            case 3: hue = make_float3(0.0f, 1.0f, 1.0f); break;
+            case 4: hue = make_float3(0.0f, 0.0f, 1.0f); break;
+            case 5: hue = make_float3(1.0f, 0.0f, 1.0f); break;
+            default: hue = make_float3(1.0f, 1.0f, 1.0f); break;
         }
+        const float stopsLo = -8.0f;
+        const float stopsHi = 16.0f;
+        float lvl = 0.18f * (_powf(2.0f, stopsLo + (stopsHi - stopsLo) * t) - _powf(2.0f, stopsLo));
+        float d = (t - 0.875f) / 0.125f;
+        d = d < 0.0f ? 0.0f : (d > 1.0f ? 1.0f : d);
+        d = d * d * (3.0f - 2.0f * d);
+        rgb = make_float3(lvl * (hue.x + (1.0f - hue.x) * d),
+                          lvl * (hue.y + (1.0f - hue.y) * d),
+                          lvl * (hue.z + (1.0f - hue.z) * d));
+    } else {
+        rgb = odt_linearize(rgb, params->inOetf);
     }
-
-    rgb = odt_linearize(rgb, params->inOetf);
 
     // Load dynamic matrices
     float3 inputMatrix[3];
@@ -736,7 +807,8 @@ LDT_FUNC float3 opendrt_processPixel(float3 in_, int x, int y, int w, int h,
     if (params->brlPresetEnable || params->brlUIEnable) {
         brl_f = -params->brlR*ha_rgb.x - params->brlG*ha_rgb.y - params->brlB*ha_rgb.z - params->brlC*ha_cmy.x - params->brlM*ha_cmy.y - params->brlY*ha_cmy.z;
         brl_f = (1.0f - ach_d)*brl_f + 1.0f - brl_f;
-        brl_f = odt_softplus(brl_f, 0.25f, -100.0f, 0.0f);
+        if (params->mathVariant == 1) brl_f = odt_softplus_uc(brl_f, 0.25f); // upstream v1.0.1
+        else brl_f = odt_softplus(brl_f, 0.25f, -100.0f, 0.0f);
 
         float brl_ts = brl_f > 1.0f ? 1.0f - ts_pt : ts_pt;
         float brl_lim = odt_spowf(brl_ts, 1.0f - params->brlRng);
@@ -858,9 +930,15 @@ LDT_FUNC float3 opendrt_processPixel(float3 in_, int x, int y, int w, int h,
     --------------------------------------------------*/
     if (params->ptlPresetEnable || params->ptlUIEnable) {
         float sum0 = odt_softplus(rgb.x, 0.2f, -100.0f, -0.3f) + rgb.y + odt_softplus(rgb.z, 0.2f, -100.0f, -0.3f);
-        rgb.x = odt_softplus(rgb.x, 0.04f, -0.3f, 0.0f);
-        rgb.y = odt_softplus(rgb.y, 0.06f, -0.3f, 0.0f);
-        rgb.z = odt_softplus(rgb.z, 0.01f, -0.05f, 0.0f);
+        if (params->mathVariant == 1) { // upstream v1.0.1: unconstrained, stronger
+            rgb.x = odt_softplus_uc(rgb.x, 0.06f);
+            rgb.y = odt_softplus_uc(rgb.y, 0.06f);
+            rgb.z = odt_softplus_uc(rgb.z, 0.04f);
+        } else {
+            rgb.x = odt_softplus(rgb.x, 0.04f, -0.3f, 0.0f);
+            rgb.y = odt_softplus(rgb.y, 0.06f, -0.3f, 0.0f);
+            rgb.z = odt_softplus(rgb.z, 0.01f, -0.05f, 0.0f);
+        }
 
         float ptl_norm = _fminf(1.0f, odt_sdivf(sum0, rgb.x + rgb.y + rgb.z));
         rgb = rgb * ptl_norm;
