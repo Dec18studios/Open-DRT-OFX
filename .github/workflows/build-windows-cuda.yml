@@ -10,7 +10,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       BUNDLE_NAME: OpenDRT.ofx.bundle
       BUNDLE_EXECUTABLE: OpenDRT.ofx
-      ZIP_NAME: OpenDRT_${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}_windows_x86_64_cuda.zip
+      # One zip holds both GPU backends (CUDA and OpenCL).
+      ZIP_NAME: OpenDRT_windows_cuda.zip
       ARTIFACT_NAME: OpenDRT-${{ github.ref_type == 'tag' && github.ref_name || github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-windows-cuda
 
     runs-on: windows-2022
@@ -52,10 +53,41 @@ jobs:
       - name: Configure
         run: |
           cmake -S . -B build-win-ci -G "Visual Studio 17 2022" -A x64 `
-            -DCUDAToolkit_ROOT="$env:CUDA_PATH"
+            -DCUDAToolkit_ROOT="$env:CUDA_PATH" | Tee-Object -FilePath cmake-configure-win.log
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)." }
+          # The OpenCL headers come from the CUDA toolkit (CUDA_PATH). If they go
+          # missing the plugin would silently ship without its OpenCL backend.
+          if (-not (Select-String -Path cmake-configure-win.log -SimpleMatch -Quiet "OpenCL backend ON")) {
+            throw "OpenCL backend is not ON in the configure output (see cmake-configure-win.log)."
+          }
 
       - name: Build
         run: cmake --build build-win-ci --config Release
+
+      - name: Verify OpenCL backend (compiled in, not linked)
+        run: |
+          # Every model's kernel source is embedded at build time.
+          foreach ($sym in @("OpenDRT","OpenDRTv11","Tesseract","Chromagnon")) {
+            $hdr = "build-win-ci/generated/${sym}OpenCLKernelSource.h"
+            if (-not (Test-Path $hdr -PathType Leaf)) { throw "Missing generated OpenCL kernel header: $hdr" }
+          }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $dumpbin = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Recurse -Filter dumpbin.exe |
+            Where-Object { $_.FullName -match "Hostx64\\x64" } | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin.exe not found under $vsPath" }
+
+          $exe = "bundle/$env:BUNDLE_NAME/Contents/Win64/$env:BUNDLE_EXECUTABLE"
+          if (-not (Test-Path $exe -PathType Leaf)) { throw "Missing OFX binary: $exe" }
+          $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes((Resolve-Path $exe)))
+          if (-not $text.Contains("OpenDRTKernel")) { throw "$exe does not contain the OpenCL kernel name OpenDRTKernel" }
+          # The ICD loader is opened at run time and cudart is static: neither may
+          # show up as an import, or the plugin fails to load without them.
+          $deps = & $dumpbin.FullName /dependents $exe | Out-String
+          Write-Host $deps
+          if ($deps -match "(?i)opencl") { throw "$exe links OpenCL.dll; it must be loaded at run time instead." }
+          if ($deps -match "(?i)cudart") { throw "$exe links the shared CUDA runtime; expected cudart_static." }
 
       - name: Verify staged OFX bundle structure
         run: |
@@ -68,6 +100,7 @@ jobs:
           if (-not (Test-Path (Join-Path $bundleRoot "Contents/Win64") -PathType Container)) { throw "Missing Win64 directory." }
           if (-not (Test-Path $resourcesPath -PathType Container)) { throw "Missing Resources directory." }
           if (-not (Test-Path $exePath -PathType Leaf)) { throw "Missing staged OFX binary: $exePath" }
+          if (-not (Test-Path (Join-Path $resourcesPath "com.dec18studios.OpenDRT.png") -PathType Leaf)) { throw "Missing effect-list icon." }
 
       - name: Package Windows CUDA portable bundle
         run: |

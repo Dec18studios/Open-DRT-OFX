@@ -214,4 +214,9 @@ struct OpenDRTParams {
 
     // ── Hue Anchor Compression sub-struct (carried; NOT read by kernel) ──
     OpenDRT_HueCompressionParams hueCompression;
+
+    // Math variant (READ by kernel). 0 = the shipped math (default, zero-init),
+    // 1 = upstream v1.0.1 (unconstrained softplus in Brilliance and in the
+    // per-channel Purity Compress Low calls). Append-only: keep this last.
+    int   mathVariant;
 };

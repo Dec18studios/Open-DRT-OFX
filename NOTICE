@@ -13,11 +13,22 @@ The core display-transform algorithm in this repository
 (source/tools/6A_OpenDRT/core/) is derived from Jed Smith's OpenDRT and
 remains licensed under the GNU General Public License v3.0 (see LICENSE).
 
+The Model control adds further transforms from the same upstream project and
+author, ported to this plug-in and also licensed under GPL-3.0:
+
+  * OpenDRT v1.1 (source/tools/6A_OpenDRT/core/OpenDRTv11*.h)
+  * Tesseract    (source/tools/6A_OpenDRT/core/Tesseract*.h)
+  * Chromagnon   (source/tools/6A_OpenDRT/core/Chromagnon*.h)
+
 Modifications and additions by Dec. 18 Studios, also under GPL-3.0:
 
   * OpenFX plug-in wrapper (parameters, host integration, bundle packaging)
   * CUDA backend  (source/tools/6A_OpenDRT/cuda/)   — Windows / Linux GPU path
   * Metal backend (source/tools/6A_OpenDRT/metal/)  — macOS GPU path
+  * OpenCL backend (source/tools/6A_OpenDRT/opencl/): Windows and Linux GPU
+    path, with the OpenCL driver loaded at run time
+  * Preset manager (My Presets: save, share, import) and Factory Settings
+  * Shared plug-in support code (source/shared/)
   * Cross-platform build system and CI for macOS (universal), Windows (CUDA),
     and Linux (CUDA).
 
